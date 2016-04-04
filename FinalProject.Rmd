@@ -1,0 +1,183 @@
+---
+title: "Practical Machine Learning - Final Project"
+author: "Prakash Inuganti"
+date: "April 3, 2016"
+output: html_document
+---
+#Project Details
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+##Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+##Read and Load Data
+```{r, cache=TRUE, echo=TRUE}
+library(caret)
+library(knitr)
+library(RGtk2)
+set.seed(12345)
+
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+```
+
+Breakdown the training set into 2 sets at 60:40 ratio
+
+```{r, echo=TRUE}
+library(caret)
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+dim(myTraining)
+dim(myTesting)
+```
+##Cleaning Data
+
+Now remove values whose variance is approaching zero
+```{r, echo=TRUE}
+nzv <- nearZeroVar(myTraining, saveMetrics=TRUE)
+myTraining <- myTraining[,nzv$nzv==FALSE]
+
+nzv<- nearZeroVar(myTesting,saveMetrics=TRUE)
+myTesting <- myTesting[,nzv$nzv==FALSE]
+
+myTraining <- myTraining[c(-1)]
+
+trainingV3 <- myTraining
+for(i in 1:length(myTraining)) {
+    if( sum( is.na( myTraining[, i] ) ) /nrow(myTraining) >= .7) {
+        for(j in 1:length(trainingV3)) {
+            if( length( grep(names(myTraining[i]), names(trainingV3)[j]) ) == 1)  {
+                trainingV3 <- trainingV3[ , -j]
+            }   
+        } 
+    }
+}
+
+myTraining <- trainingV3
+rm(trainingV3)
+
+clean1 <- colnames(myTraining)
+clean2 <- colnames(myTraining[, -58])  
+myTesting <- myTesting[clean1]         
+testing <- testing[clean2]             
+
+dim(myTesting)
+```
+
+Coersing the data into same type
+```{r, echo=TRUE}
+for (i in 1:length(testing) ) {
+    for(j in 1:length(myTraining)) {
+        if( length( grep(names(myTraining[i]), names(testing)[j]) ) == 1)  {
+            class(testing[j]) <- class(myTraining[i])
+        }      
+    }      
+}
+
+testing <- rbind(myTraining[2, -58] , testing)
+testing <- testing[-1,]
+```
+
+##Prediction with Random Trees
+
+```{r, echo=TRUE}
+library(rpart)
+library(RColorBrewer)
+library(rattle)
+set.seed(12345)
+modFitA1 <- rpart(classe ~ ., data=myTraining, method="class")
+fancyRpartPlot(modFitA1)
+```
+
+```{r, echo=TRUE}
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+cmtree <- confusionMatrix(predictionsA1, myTesting$classe)
+cmtree
+```
+
+```{r, echo=TRUE, cache=TRUE}
+library(rpart.plot)
+plot(cmtree$table, col = cmtree$byClass, main = paste("Decision Tree Confusion Matrix: Accuracy =", round(cmtree$overall['Accuracy'], 4)))
+```
+##Prediction with Random Forests
+
+```{r, echo=TRUE}
+library(randomForest)
+library(caret)
+set.seed(12345)
+modFitB1 <- randomForest(classe ~ ., data=myTraining)
+predictionB1 <- predict(modFitB1, myTesting, type = "class")
+cmrf <- confusionMatrix(predictionB1, myTesting$classe)
+cmrf
+```
+
+```{r, echo=TRUE}
+plot(modFitB1)
+```
+
+```{r, echo=TRUE}
+plot(cmrf$table, col = cmtree$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmrf$overall['Accuracy'], 4)))
+```
+<!--#Prediction with Generalized Boosted Regression -->
+
+```{r, echo=FALSE}
+#library(randomForest)
+#library(caret)
+#set.seed(12345)
+#fitControl <- trainControl(method = "repeatedcv",
+#                           number = 5,
+#                           repeats = 1)
+
+#gbmFit1 <- train(classe ~ ., data=myTraining, method = "gbm",
+#                 trControl = fitControl,
+#                 verbose = FALSE)
+
+
+#gbmFinMod1 <- gbmFit1$finalModel
+
+#gbmPredTest <- predict(gbmFit1, newdata=myTesting)
+#gbmAccuracyTest <- confusionMatrix(gbmPredTest, myTesting$classe)
+#gbmAccuracyTest
+```
+
+```{r, echo=FALSE}
+#library(rpart.plot)
+#plot(gbmFit1, ylim=c(0.9, 1))
+```
+
+##Predicting results on Testing data
+Random Forests gave an Accuracy in the myTesting dataset of 99.89%, which was more accurate that what I got from the Decision Trees or GBM. The expected out-of-sample error is 100-99.89 = 0.11%.
+```{r, echo=TRUE}
+predictionB2 <- predict(modFitB1, testing, type = "class")
+predictionB2
+```
+
+```{r, echo=FALSE}
+# Write the results to a text file for submission
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(predictionB2)
+```
